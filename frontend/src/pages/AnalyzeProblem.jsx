@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { analyzeProblem, startTroubleshooting, sendStepFeedback } from '../api';
-import { Settings2, Cpu, AlertTriangle, CheckCircle2, Loader2, ThermometerSun, Gauge, Zap, XCircle } from 'lucide-react';
+import { Settings2, Cpu, AlertTriangle, CheckCircle2, Loader2, ThermometerSun, Gauge, Zap, XCircle, Camera, UploadCloud, X } from 'lucide-react';
 
 export default function AnalyzeProblem() {
   const [loading, setLoading] = useState(false);
@@ -10,6 +10,11 @@ export default function AnalyzeProblem() {
   const [sessionLoading, setSessionLoading] = useState(false);
   const [customSolution, setCustomSolution] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
+
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const fileInputRef = useRef(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const [formData, setFormData] = useState({
     process_type: 'extrusion',
@@ -24,6 +29,29 @@ export default function AnalyzeProblem() {
     cycle_time: 30,
     regrind_percentage: 10,
   });
+
+  const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = (e) => { e.preventDefault(); setIsDragging(false); };
+  const handleDrop = (e) => {
+    e.preventDefault(); setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFileSelection(e.dataTransfer.files[0]);
+  };
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files[0]) handleFileSelection(e.target.files[0]);
+  };
+  const handleFileSelection = (selectedFile) => {
+    if (!selectedFile.type.startsWith('image/')) {
+      setError('Please select a valid image file.');
+      return;
+    }
+    setFile(selectedFile);
+    setPreview(URL.createObjectURL(selectedFile));
+    setError(null);
+  };
+  const clearFile = () => {
+    setFile(null); setPreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -43,11 +71,22 @@ export default function AnalyzeProblem() {
     setCustomSolution('');
 
     try {
+      let imageBase64 = null;
+      if (file) {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        await new Promise((resolve, reject) => {
+          reader.onload = () => resolve();
+          reader.onerror = reject;
+        });
+        imageBase64 = reader.result.split(',')[1];
+      }
+
       // Format as expected by backend: process_type string, machine_parameters dict
       const { process_type, ...machineParams } = formData;
-      console.log('API Request Payload:', { process_type, machine_parameters: machineParams });
+      console.log('API Request Payload:', { process_type, machine_parameters: machineParams, has_image: !!imageBase64 });
       
-      const res = await analyzeProblem(process_type, machineParams);
+      const res = await analyzeProblem(process_type, machineParams, imageBase64);
       console.log('API Response:', res.data);
       setResult(res.data);
 
@@ -141,6 +180,47 @@ export default function AnalyzeProblem() {
                 className="input-field py-2 w-full"
                 placeholder="Describe the issue you are facing..."
                 rows="3"
+              />
+            </div>
+
+            {/* Image Upload Area */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-end">
+                <label className="text-sm font-medium text-industrial-300">Defect Image (Optional)</label>
+                <span className="text-[10px] text-industrial-500 uppercase tracking-widest bg-industrial-800 px-2 py-0.5 rounded">Vision AI</span>
+              </div>
+              {!preview ? (
+                <div
+                  className={`w-full rounded-lg border-2 border-dashed flex flex-col items-center justify-center p-6 cursor-pointer transition-colors
+                    ${isDragging ? 'border-primary-500 bg-primary-500/10' : 'border-industrial-700 bg-industrial-900/50 hover:border-primary-500/50'}`}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Camera className={`w-8 h-8 mb-2 ${isDragging ? 'text-primary-400' : 'text-industrial-500'}`} />
+                  <p className="text-sm text-industrial-300 text-center font-medium">Click to use camera or upload photo</p>
+                  <p className="text-xs text-industrial-500 mt-1">Supports drag and drop</p>
+                </div>
+              ) : (
+                <div className="relative rounded-lg overflow-hidden border border-industrial-700 bg-industrial-950 flex items-center justify-center p-2">
+                  <img src={preview} alt="Defect" className="max-h-48 rounded object-contain" />
+                  <button
+                    type="button"
+                    onClick={clearFile}
+                    className="absolute top-2 right-2 p-1.5 bg-industrial-900/80 hover:bg-red-500/20 hover:text-red-400 text-white rounded backdrop-blur-sm transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                accept="image/*"
+                capture="environment"
+                className="hidden"
               />
             </div>
 

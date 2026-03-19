@@ -92,6 +92,7 @@ class MachineParameters(BaseModel):
 class AnalysisRequest(BaseModel):
     machine_parameters: Dict[str, Any]
     process_type: str
+    image_base64: Optional[str] = None
 
 class AnalysisResponse(BaseModel):
     problem: Optional[ProblemResponse] = None

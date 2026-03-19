@@ -19,10 +19,11 @@ export const getTroubleshootingSteps = (problemId) =>
   api.get(`/get_troubleshooting_steps/${problemId}`);
 
 // ── Analysis ──
-export const analyzeProblem = (processType, machineParameters) =>
+export const analyzeProblem = (processType, machineParameters, imageBase64 = null) =>
   api.post('/analyze_problem', {
     process_type: processType,
     machine_parameters: machineParameters,
+    image_base64: imageBase64,
   });
 
 // ── Photo Detection ──

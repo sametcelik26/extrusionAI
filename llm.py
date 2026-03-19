@@ -26,7 +26,7 @@ async def _is_ollama_available() -> bool:
     return bool(model)
 
 
-async def generate_response(prompt: str) -> str:
+async def generate_response(prompt: str, images: Optional[List[str]] = None) -> str:
     """Send text query to the first available Ollama model."""
     model = await _get_first_available_model()
     if not model:
@@ -34,13 +34,17 @@ async def generate_response(prompt: str) -> str:
 
     async with httpx.AsyncClient() as client:
         try:
+            payload: Dict[str, Any] = {
+                "model": model,
+                "prompt": prompt,
+                "stream": False
+            }
+            if images:
+                payload["images"] = images
+
             response = await client.post(
                 f"{OLLAMA_BASE_URL}/generate",
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": False
-                },
+                json=payload,
                 timeout=120.0
             )
             response.raise_for_status()
@@ -52,7 +56,7 @@ async def generate_response(prompt: str) -> str:
             return f"OLLAMA_ERROR: {e}"
 
 
-async def analyze_problem_with_llm(parameters: Dict[str, Any], process_type: str) -> Dict[str, Any]:
+async def analyze_problem_with_llm(parameters: Dict[str, Any], process_type: str, image_base64: Optional[str] = None) -> Dict[str, Any]:
     """
     Ask LLM to suggest the most probable problem using a strict JSON format.
     Falls back to a simple dict with error info if Ollama is offline.
@@ -67,10 +71,11 @@ async def analyze_problem_with_llm(parameters: Dict[str, Any], process_type: str
         }
 
     # Include process type correctly: extrusion, injection, or blow molding
+    image_prompt_addition = " and the attached defect image" if image_base64 else ""
     prompt = f"""You are an expert plastic manufacturing troubleshooter specializing in {process_type}.
 It is crucial that your analysis works across extrusion, injection, and blow molding processes.
 
-Analyze the following machine parameters (e.g., temperature, pressure, speed) and identify the most probable production problem.
+Analyze the following machine parameters (e.g., temperature, pressure, speed){image_prompt_addition} and identify the most probable production problem.
 
 Machine Parameters:
 {json.dumps(parameters, indent=2)}
@@ -88,7 +93,7 @@ Respond with this EXACT JSON format (no extra text around it):
 }}
 """
 
-    raw = await generate_response(prompt)
+    raw = await generate_response(prompt, images=[image_base64] if image_base64 else None)
 
     if raw.startswith("OLLAMA_ERROR"):
         return {

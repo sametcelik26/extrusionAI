@@ -80,7 +80,8 @@ async def analyze_problem(request: schemas.AnalysisRequest, db: Session = Depend
     # Try LLM analysis
     llm_result = await llm.analyze_problem_with_llm(
         request.machine_parameters,
-        request.process_type
+        request.process_type,
+        request.image_base64
     )
 
     ollama_available = llm_result.get("ollama_available", False)
