@@ -1,0 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-industrial-950 text-industrial-100 font-sans antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-industrial-900;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-industrial-600 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-industrial-500;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-industrial-800 border border-industrial-700 rounded-xl p-6 transition-all duration-200;
+  }
+  .card-hover {
+    @apply card hover:border-primary-500/50 hover:shadow-lg hover:shadow-primary-500/10 cursor-pointer;
+  }
+  .btn-primary {
+    @apply bg-accent-500 hover:bg-accent-600 text-industrial-900 font-semibold px-6 py-3 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply bg-industrial-700 hover:bg-industrial-600 text-industrial-100 font-medium px-6 py-3 rounded-lg border border-industrial-600 transition-all duration-200;
+  }
+  .btn-success {
+    @apply bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-6 py-3 rounded-lg transition-all duration-200;
+  }
+  .btn-danger {
+    @apply bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 font-medium px-6 py-3 rounded-lg transition-all duration-200;
+  }
+  .input-field {
+    @apply w-full bg-industrial-900 border border-industrial-600 rounded-lg px-4 py-3 text-industrial-100 placeholder-industrial-500 focus:border-primary-500 focus:ring-1 focus:ring-primary-500 focus:outline-none transition-all;
+  }
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold;
+  }
+  .badge-severity-low {
+    @apply badge bg-severity-low/20 text-severity-low;
+  }
+  .badge-severity-medium {
+    @apply badge bg-severity-medium/20 text-severity-medium;
+  }
+  .badge-severity-high {
+    @apply badge bg-severity-high/20 text-severity-high;
+  }
+  .badge-severity-critical {
+    @apply badge bg-severity-critical/20 text-severity-critical;
+  }
+  .badge-process-extrusion {
+    @apply badge bg-blue-500/20 text-blue-400;
+  }
+  .badge-process-injection {
+    @apply badge bg-purple-500/20 text-purple-400;
+  }
+  .badge-process-blow_molding {
+    @apply badge bg-teal-500/20 text-teal-400;
+  }
+}

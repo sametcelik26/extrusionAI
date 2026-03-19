@@ -4,22 +4,34 @@ import json
 import re
 
 OLLAMA_BASE_URL = "http://localhost:11434/api"
-DEFAULT_TEXT_MODEL = "llama3"
-DEFAULT_VISION_MODEL = "llava"
+
+
+async def _get_first_available_model() -> str:
+    """Check Ollama API and get the first available model (e.g., gemma3:4b)."""
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{OLLAMA_BASE_URL}/tags", timeout=3.0)
+            if resp.status_code == 200:
+                models = resp.json().get("models", [])
+                if models:
+                    return models[0]["name"]
+    except Exception:
+        pass
+    return ""
 
 
 async def _is_ollama_available() -> bool:
-    """Check if Ollama is running."""
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"http://localhost:11434/", timeout=3.0)
-            return resp.status_code == 200
-    except Exception:
-        return False
+    """Check if Ollama is running and has at least one model."""
+    model = await _get_first_available_model()
+    return bool(model)
 
 
-async def generate_response(prompt: str, model: str = DEFAULT_TEXT_MODEL) -> str:
-    """Send text query to Ollama."""
+async def generate_response(prompt: str) -> str:
+    """Send text query to the first available Ollama model."""
+    model = await _get_first_available_model()
+    if not model:
+        return "OLLAMA_ERROR: No models available."
+
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
@@ -42,11 +54,11 @@ async def generate_response(prompt: str, model: str = DEFAULT_TEXT_MODEL) -> str
 
 async def analyze_problem_with_llm(parameters: Dict[str, Any], process_type: str) -> Dict[str, Any]:
     """
-    Ask LLM to suggest the most probable problem.
-    Returns structured dict: { problem_name, confidence, reasoning }
-    Falls back to a simple dict with error info if Ollama is unavailable.
+    Ask LLM to suggest the most probable problem using a strict JSON format.
+    Falls back to a simple dict with error info if Ollama is offline.
     """
-    if not await _is_ollama_available():
+    model = await _get_first_available_model()
+    if not model:
         return {
             "problem_name": "",
             "confidence": 0.0,
@@ -54,19 +66,27 @@ async def analyze_problem_with_llm(parameters: Dict[str, Any], process_type: str
             "ollama_available": False
         }
 
+    # Include process type correctly: extrusion, injection, or blow molding
     prompt = f"""You are an expert plastic manufacturing troubleshooter specializing in {process_type}.
+It is crucial that your analysis works across extrusion, injection, and blow molding processes.
 
-Analyze the following machine parameters and identify the most probable production problem.
+Analyze the following machine parameters (e.g., temperature, pressure, speed) and identify the most probable production problem.
 
 Machine Parameters:
 {json.dumps(parameters, indent=2)}
 
-Respond in this EXACT JSON format (no extra text):
+Respond with this EXACT JSON format (no extra text around it):
 {{
-  "problem_name": "<short descriptive problem name>",
-  "confidence": <0.0 to 1.0>,
-  "reasoning": "<brief explanation of why these parameters indicate this problem>"
-}}"""
+  "solution": "<short descriptive problem name or solution approach>",
+  "notes": "<detailed explanation of why these parameters indicate this problem>",
+  "recommended_params": {{
+    "temperature": "<suggested range or value>",
+    "pressure": "<suggested range or value>",
+    "speed": "<suggested range or value>",
+    "other": "<any other process-specific parameters>"
+  }}
+}}
+"""
 
     raw = await generate_response(prompt)
 
@@ -78,26 +98,27 @@ Respond in this EXACT JSON format (no extra text):
             "ollama_available": False
         }
 
-    # Try to parse JSON from the response
+    # Try to parse exact JSON from the response
     try:
-        # Find JSON in the response (LLM might add extra text)
         json_match = re.search(r'\{[^{}]*\}', raw, re.DOTALL)
         if json_match:
             parsed = json.loads(json_match.group())
+            # Map strict JSON onto the internal format for main.py compatibility, 
+            # while preserving raw JSON logic so it's transparently passed.
             return {
-                "problem_name": parsed.get("problem_name", ""),
-                "confidence": float(parsed.get("confidence", 0.5)),
-                "reasoning": parsed.get("reasoning", ""),
+                "problem_name": parsed.get("solution", ""),
+                "confidence": 0.9,
+                "reasoning": json.dumps(parsed, indent=2), # Store the whole JSON in reasoning
                 "ollama_available": True
             }
     except (json.JSONDecodeError, ValueError):
         pass
 
-    # Fallback: treat entire response as the problem name
+    # Fallback to mapping the raw, unparseable LLM output
     return {
-        "problem_name": raw[:200],
+        "problem_name": "Suggested Process Adjustment",
         "confidence": 0.5,
-        "reasoning": "Could not parse structured response from LLM.",
+        "reasoning": raw,
         "ollama_available": True
     }
 
@@ -107,7 +128,8 @@ async def detect_defect_from_image(image_base64: str) -> Dict[str, Any]:
     Send base64 encoded image to vision model.
     Returns dict: { defects: [{ name, confidence }], raw_response }
     """
-    if not await _is_ollama_available():
+    model = await _get_first_available_model()
+    if not model:
         return {
             "defects": [],
             "raw_response": "Ollama is not available. Cannot analyze image.",
@@ -127,7 +149,7 @@ Identify ALL visible defects from this list:
 Respond in this EXACT JSON format (no extra text):
 {
   "defects": [
-    {"name": "<defect_name>", "confidence": <0.0 to 1.0>}
+    {"name": "<defect_name>", "confidence": 0.0 to 1.0}
   ]
 }
 
@@ -138,7 +160,7 @@ If no defects are visible, return: {"defects": []}"""
             response = await client.post(
                 f"{OLLAMA_BASE_URL}/generate",
                 json={
-                    "model": DEFAULT_VISION_MODEL,
+                    "model": model,  # Rely on dynamic model
                     "prompt": prompt,
                     "images": [image_base64],
                     "stream": False
@@ -149,7 +171,6 @@ If no defects are visible, return: {"defects": []}"""
             data = response.json()
             raw = data.get("response", "").strip()
 
-            # Try to parse JSON
             try:
                 json_match = re.search(r'\{.*\}', raw, re.DOTALL)
                 if json_match:
@@ -163,7 +184,6 @@ If no defects are visible, return: {"defects": []}"""
             except (json.JSONDecodeError, ValueError):
                 pass
 
-            # Fallback: try to extract defect names from text
             known_defects = ["flash", "bubbles", "streaks", "uneven_wall_thickness",
                              "burn_marks", "melt_fracture", "warpage"]
             found = []
@@ -179,6 +199,12 @@ If no defects are visible, return: {"defects": []}"""
             }
 
         except httpx.RequestError as e:
+            return {
+                "defects": [],
+                "raw_response": f"Error: {e}",
+                "ollama_available": False
+            }
+        except httpx.HTTPStatusError as e:
             return {
                 "defects": [],
                 "raw_response": f"Error: {e}",

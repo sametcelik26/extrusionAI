@@ -4,11 +4,22 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import base64
 
-import models, schemas, crud, ollama_client
+import models, schemas, crud, llm, seed
 from database import engine, get_db
 
-# Create DB tables
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Create DB tables and auto-seed if empty
+logger.info("Initializing database...")
 models.Base.metadata.create_all(bind=engine)
+try:
+    seed.seed_db()
+    logger.info("Database initialized successfully.")
+except Exception as e:
+    logger.warning(f"Warning: Auto-seeding failed or was skipped: {e}")
 
 app = FastAPI(
     title="ExtrusionAI Backend",
@@ -28,9 +39,33 @@ app.add_middleware(
 # ═══════════════════════════════════════════════════════════════
 #  Health Check
 # ═══════════════════════════════════════════════════════════════
+@app.get("/health")
 @app.get("/")
-def read_root():
-    return {"message": "ExtrusionAI API is running", "version": "2.0.0"}
+async def health_check(db: Session = Depends(get_db)):
+    """Comprehensive health check for the system."""
+    status = {
+        "status": "ok",
+        "database": "disconnected",
+        "ollama": "not processing requests",
+        "version": "2.0.0"
+    }
+    
+    # Check DB
+    try:
+        from sqlalchemy import text
+        db.execute(text("SELECT 1"))
+        status["database"] = "connected"
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
+        status["status"] = "error"
+    
+    # Check Ollama
+    if await llm._is_ollama_available():
+        status["ollama"] = "running"
+        
+    from datetime import datetime
+    status["last_checked"] = datetime.now().isoformat()
+    return status
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -43,7 +78,7 @@ async def analyze_problem(request: schemas.AnalysisRequest, db: Session = Depend
     Uses Ollama LLM when available, falls back to database matching.
     """
     # Try LLM analysis
-    llm_result = await ollama_client.analyze_problem_with_llm(
+    llm_result = await llm.analyze_problem_with_llm(
         request.machine_parameters,
         request.process_type
     )
@@ -106,7 +141,7 @@ async def upload_defect_photo(file: UploadFile = File(...), db: Session = Depend
     contents = await file.read()
     image_base64 = base64.b64encode(contents).decode("utf-8")
 
-    result = await ollama_client.detect_defect_from_image(image_base64)
+    result = await llm.detect_defect_from_image(image_base64)
 
     defects = result.get("defects", [])
     raw_response = result.get("raw_response", "")
