@@ -56,9 +56,9 @@ async def generate_response(prompt: str, images: Optional[List[str]] = None) -> 
             return f"OLLAMA_ERROR: {e}"
 
 
-async def analyze_problem_with_llm(parameters: Dict[str, Any], process_type: str, image_base64: Optional[str] = None) -> Dict[str, Any]:
+async def analyze_problem_with_llm(parameters: Dict[str, Any], process_type: str, past_data: str, image_base64: Optional[str] = None) -> Dict[str, Any]:
     """
-    Ask LLM to suggest the most probable problem using a strict JSON format.
+    Ask LLM to suggest the most probable problem.
     Falls back to a simple dict with error info if Ollama is offline.
     """
     model = await _get_first_available_model()
@@ -70,27 +70,57 @@ async def analyze_problem_with_llm(parameters: Dict[str, Any], process_type: str
             "ollama_available": False
         }
 
-    # Include process type correctly: extrusion, injection, or blow molding
-    image_prompt_addition = " and the attached defect image" if image_base64 else ""
-    prompt = f"""You are an expert plastic manufacturing troubleshooter specializing in {process_type}.
-It is crucial that your analysis works across extrusion, injection, and blow molding processes.
+    material_type = parameters.get("material_type", "Unknown")
+    image_prompt_addition = "\nDefect Image Attached." if image_base64 else ""
+    prompt = f"""You are a Senior Polymer Process Engineer AI integrated into the ExtrusionAI system.
 
-Analyze the following machine parameters (e.g., temperature, pressure, speed){image_prompt_addition} and identify the most probable production problem.
+Your objective is to provide a professional, industrial-grade diagnostic analysis.
 
-Machine Parameters:
-{json.dumps(parameters, indent=2)}
+You MUST follow these rules:
+- Be material-aware. Current Material is: {material_type} (Remember material specific behaviors: HDPE high shrinkage risk, LDPE sagging tendency, PP sensitive to cooling, PVC extremely heat-sensitive/burn risk, PET moisture-critical, ABS/PC surface quality critical).
+- Be process-aware. Current Process is: {process_type} (Extrusion, Injection, or Extrusion Blow Molding).
+- Recognize defect patterns intelligently and expand your known defect database.
+- Utilize a Parameter Correlation Engine: Analyze parameter combinations, not single variables (e.g., High temp + high screw speed -> Melt fracture; Low mold temp + fast cooling -> Warpage; High moisture + high regrind -> Bubbles).
+- Provide prioritized solutions like an industrial troubleshooting PDF: Sequential, most probable -> least probable, fastest -> slowest, lowest cost -> highest cost.
+- Do NOT provide generic answers. Be technical and actionable. Ensure real factory usability.
 
-Respond with this EXACT JSON format (no extra text around it):
-{{
-  "solution": "<short descriptive problem name or solution approach>",
-  "notes": "<detailed explanation of why these parameters indicate this problem>",
-  "recommended_params": {{
-    "temperature": "<suggested range or value>",
-    "pressure": "<suggested range or value>",
-    "speed": "<suggested range or value>",
-    "other": "<any other process-specific parameters>"
-  }}
-}}
+PAST SOLVED PROBLEMS & KNOWLEDGE DATABASE:
+{past_data}
+
+CURRENT MACHINE PARAMETERS & INPUT:
+{json.dumps(parameters, indent=2)}{image_prompt_addition}
+
+OUTPUT FORMAT (MANDATORY):
+Every response must strictly follow this structure:
+
+## Problem Name: <Specific Defect or Issue>
+
+### 1. CLASSIFICATION
+- **Process:** {process_type}
+- **Material:** {material_type}
+- **Defect Type:** <Choose from: Surface defects, Dimensional defects, Mechanical defects, Flow-related defects, Thermal degradation defects>
+
+### 2. ROOT CAUSE GROUPING (CRITICAL)
+<Organize all likely causes into these 5 main categories. Only include the relevant causes for this problem:>
+1. **Material Issues** (e.g., Moisture, MFI mismatch, Contamination, Regrind ratio, Thermal sensitivity)
+2. **Process Parameters** (e.g., Temperature profile, Screw speed, Back pressure, Pressure, Cooling time)
+3. **Machine Issues** (e.g., Screw wear, Non-return valve leakage, Heater band failure, Accumulator issues)
+4. **Tooling / Mold / Die** (e.g., Die misalignment, Gate design, Venting, Mold temperature imbalance)
+5. **Operator / Environment** (e.g., Ambient humidity, Setup inconsistency, Insufficient purging)
+
+### 3. STEP-BY-STEP SOLUTION SYSTEM
+<Provide solutions sequentially starting from most probable/fastest/cheapest>
+<Format each step EXACTLY like this:>
+**Step [X]:**
+- **Action:** <Specific technical action, e.g., Reduce melt temperature by 5-10°C>
+- **Reason:** <Technical justification, e.g., Prevent polymer degradation>
+- **Expected Result:** <What the operator will observe, e.g., Surface defects decrease>
+
+### 4. PARAMETER RECOMMENDATIONS
+<Provide optimized, specific parameter adjustments combining variables>
+
+### 5. FOLLOW-UP
+Did this solve the problem?
 """
 
     raw = await generate_response(prompt, images=[image_base64] if image_base64 else None)
@@ -121,8 +151,8 @@ Respond with this EXACT JSON format (no extra text around it):
 
     # Fallback to mapping the raw, unparseable LLM output
     return {
-        "problem_name": "Suggested Process Adjustment",
-        "confidence": 0.5,
+        "problem_name": "AI Analysis Complete",
+        "confidence": 0.8,
         "reasoning": raw,
         "ollama_available": True
     }

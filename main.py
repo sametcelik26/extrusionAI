@@ -77,10 +77,17 @@ async def analyze_problem(request: schemas.AnalysisRequest, db: Session = Depend
     Analyze machine parameters to identify the most probable production problem.
     Uses Ollama LLM when available, falls back to database matching.
     """
+    # Search database for matching problems to use as context
+    problems = crud.get_problems_by_process(db, request.process_type)
+    past_problems_str = "\n".join([f"- {p.problem_name}: {p.description}" for p in problems])
+    if not past_problems_str:
+        past_problems_str = "No past problems recorded for this process type."
+
     # Try LLM analysis
     llm_result = await llm.analyze_problem_with_llm(
         request.machine_parameters,
         request.process_type,
+        past_problems_str,
         request.image_base64
     )
 
@@ -88,9 +95,6 @@ async def analyze_problem(request: schemas.AnalysisRequest, db: Session = Depend
     problem_name = llm_result.get("problem_name", "")
     confidence = llm_result.get("confidence", 0.0)
     reasoning = llm_result.get("reasoning", "")
-
-    # Search database for matching problem
-    problems = crud.get_problems_by_process(db, request.process_type)
 
     matched_problem = None
     if problem_name:
