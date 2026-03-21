@@ -45,7 +45,7 @@ async def generate_response(prompt: str, images: Optional[List[str]] = None) -> 
             response = await client.post(
                 f"{OLLAMA_BASE_URL}/generate",
                 json=payload,
-                timeout=120.0
+                timeout=300.0
             )
             response.raise_for_status()
             data = response.json()
@@ -133,23 +133,7 @@ Did this solve the problem?
             "ollama_available": False
         }
 
-    # Try to parse exact JSON from the response
-    try:
-        json_match = re.search(r'\{[^{}]*\}', raw, re.DOTALL)
-        if json_match:
-            parsed = json.loads(json_match.group())
-            # Map strict JSON onto the internal format for main.py compatibility, 
-            # while preserving raw JSON logic so it's transparently passed.
-            return {
-                "problem_name": parsed.get("solution", ""),
-                "confidence": 0.9,
-                "reasoning": json.dumps(parsed, indent=2), # Store the whole JSON in reasoning
-                "ollama_available": True
-            }
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    # Fallback to mapping the raw, unparseable LLM output
+    # We now expect a full Markdown diagnostic log, so we pass it directly
     return {
         "problem_name": "AI Analysis Complete",
         "confidence": 0.8,
@@ -200,7 +184,7 @@ If no defects are visible, return: {"defects": []}"""
                     "images": [image_base64],
                     "stream": False
                 },
-                timeout=120.0
+                timeout=300.0
             )
             response.raise_for_status()
             data = response.json()
@@ -301,3 +285,75 @@ Be concise and technical. Format as a bullet list."""
     if raw.startswith("OLLAMA_ERROR"):
         return "Parameter analysis unavailable. Ollama is offline."
     return raw
+
+async def generate_dynamic_solutions_for_problem(
+    problem_name: str,
+    process_type: str,
+    machine_parameters: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
+    """
+    Generate dynamic troubleshooting steps using the Senior Polymer Process Engineer prompt.
+    Returns a list of dictionaries with 'description' and 'details'.
+    """
+    model = await _get_first_available_model()
+    if not model:
+        return []
+
+    params_str = json.dumps(machine_parameters, indent=2) if machine_parameters else "None provided."
+    material_type = machine_parameters.get("material_type", "Unknown") if machine_parameters else "Unknown"
+
+    prompt = f"""You are a Senior Polymer Process Engineer AI integrated into the ExtrusionAI system.
+
+Your objective is to provide a professional, industrial-grade troubleshooting guide.
+
+You MUST follow these rules:
+- Be material-aware. Current Material: {material_type}
+- Be process-aware. Current Process: {process_type}
+- Provide prioritized solutions like an industrial troubleshooting PDF: Sequential, most probable -> least probable, fastest -> slowest, cheapest -> most expensive.
+- Analyze parameter combinations.
+- Do NOT provide generic answers. Be technical and actionable.
+
+PROBLEM: {problem_name}
+CURRENT MACHINE PARAMETERS:
+{params_str}
+
+OUTPUT FORMAT:
+Generate exactly 5 sequential troubleshooting steps for this problem.
+Format each step EXACTLY like this:
+
+Step 1:
+Action: <Specific technical action to take>
+Reason: <Technical justification>
+Expected Result: <What the operator will observe>
+
+Step 2:
+...
+"""
+    raw = await generate_response(prompt)
+    if raw.startswith("OLLAMA_ERROR"):
+        return []
+
+    steps = []
+    # Use regex to parse out Step blocks
+    step_blocks = re.split(r'Step\s+\d+:', raw, flags=re.IGNORECASE)
+    
+    for block in step_blocks[1:]: # Skip text before Step 1
+        action_match = re.search(r'Action:\s*(.*?)(?=\n[A-Za-z]+:|\n*$)', block, re.IGNORECASE | re.DOTALL)
+        reason_match = re.search(r'Reason:\s*(.*?)(?=\n[A-Za-z]+:|\n*$)', block, re.IGNORECASE | re.DOTALL)
+        expected_match = re.search(r'Expected Result:\s*(.*?)(?=\n[A-Za-z]+:|\n*$)', block, re.IGNORECASE | re.DOTALL)
+        
+        if action_match:
+            action = action_match.group(1).strip()
+            reason = reason_match.group(1).strip() if reason_match else ""
+            expected = expected_match.group(1).strip() if expected_match else ""
+            
+            details = []
+            if reason: details.append(f"Reason: {reason}")
+            if expected: details.append(f"Expected Result: {expected}")
+            
+            steps.append({
+                "description": action,
+                "details": " | ".join(details)
+            })
+
+    return steps

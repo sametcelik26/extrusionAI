@@ -3,7 +3,7 @@ import axios from 'axios';
 const getBaseUrl = () =>
   localStorage.getItem('extrusionai_api_url') || 'http://localhost:8000';
 
-const api = axios.create({ timeout: 120000 });
+const api = axios.create({ timeout: 300000 });
 
 api.interceptors.request.use((config) => {
   config.baseURL = getBaseUrl();

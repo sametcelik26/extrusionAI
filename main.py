@@ -229,7 +229,7 @@ def get_similar_problems(request: schemas.AnalysisRequest, db: Session = Depends
 #  Interactive Troubleshooting Flow
 # ═══════════════════════════════════════════════════════════════
 @app.post("/start_troubleshooting", response_model=schemas.SessionStepResponse)
-def start_troubleshooting(request: schemas.StartSessionRequest, db: Session = Depends(get_db)):
+async def start_troubleshooting(request: schemas.StartSessionRequest, db: Session = Depends(get_db)):
     """
     Start an interactive troubleshooting session for a problem.
     Returns the first step to try.
@@ -237,6 +237,23 @@ def start_troubleshooting(request: schemas.StartSessionRequest, db: Session = De
     problem = crud.get_problem(db, request.problem_id)
     if not problem:
         raise HTTPException(status_code=404, detail="Problem not found")
+
+    # Generate dynamic steps using Senior AI logic
+    dynamic_steps = await llm.generate_dynamic_solutions_for_problem(
+        problem.problem_name,
+        problem.process_type,
+        request.machine_parameters
+    )
+
+    if dynamic_steps:
+        crud.delete_solutions_by_problem(db, request.problem_id)
+        for i, step_data in enumerate(dynamic_steps, start=1):
+            new_sol = schemas.SolutionCreate(
+                step_order=i,
+                description=step_data["description"],
+                details=step_data["details"]
+            )
+            crud.create_solution(db, request.problem_id, new_sol)
 
     solutions = crud.get_solutions_by_problem(db, request.problem_id)
     if not solutions:

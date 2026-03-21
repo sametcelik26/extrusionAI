@@ -81,6 +81,10 @@ def get_solutions_by_problem(db: Session, problem_id: int) -> List[models.Soluti
         models.Solution.problem_id == problem_id
     ).order_by(models.Solution.step_order).all()
 
+def delete_solutions_by_problem(db: Session, problem_id: int):
+    db.query(models.Solution).filter(models.Solution.problem_id == problem_id).delete()
+    db.commit()
+
 
 # ──────────────────── User Case (Learning) ────────────────────
 def create_user_case(db: Session, user_case: schemas.UserCaseCreate) -> models.UserCase:
